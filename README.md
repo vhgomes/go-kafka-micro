@@ -5,12 +5,6 @@ Este projeto é um exemplo de **microserviços em Go** integrados via **Apache K
 * `order-service`: responsável pelo gerenciamento de pedidos.
 * `notification-service`: responsável pelo envio de notificações baseadas em eventos do Kafka.
 
-Além disso, o projeto utiliza:
-
-* **Kafka** e **Zookeeper** para comunicação de eventos.
-* **Kafdrop** para monitoramento do Kafka via interface web.
-
-
 ## 🔹 Pré-requisitos
 
 * [Go 1.24+](https://golang.org/dl/)

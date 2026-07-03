@@ -11,7 +11,7 @@ services:
       ZOO_PORT: 2181
 
   kafka:
-    image: bitnami/kafka:latest
+    image: bitnami/kafka:3.7
     container_name: kafka
     ports:
       - "9092:9092"
@@ -19,9 +19,23 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENERS: PLAINTEXT://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # Correção: anuncia o broker com o nome do serviço na rede Docker
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
     depends_on:
       - zookeeper
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics.sh",
+          "--bootstrap-server",
+          "localhost:9092",
+          "--list",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   kafdrop:
     image: obsidiandynamics/kafdrop:3.28.0
@@ -35,21 +49,27 @@ services:
       - kafka
 
   order-service:
-    image: golang:1.24
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
     container_name: order-service
-    working_dir: /app
-    volumes:
-      - ./order-service:/app/order-service   # mapa seu binário local
-    command: ["./order-service"]
+    ports:
+      - "8080:8080" # ajuste conforme necessário
+    environment:
+      - KAFKA_BROKER_ADDRESS=kafka:9092 # variável esperada pelo serviço (exemplo)
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 
   notification-service:
-    image: golang:1.24
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
     container_name: notification-service
-    working_dir: /app
-    volumes:
-      - ./notification-service:/app/notification-service  # mapa seu binário local
-    command: ["./notification-service"]
+    ports:
+      - "8081:8081" # ajuste conforme necessário
+    environment:
+      - KAFKA_BROKER_ADDRESS=kafka:9092
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy

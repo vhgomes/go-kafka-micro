@@ -3,8 +3,9 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"github.com/segmentio/kafka-go"
 	"notification-service/internal/domain"
+
+	"github.com/segmentio/kafka-go"
 
 	"log"
 )
@@ -31,12 +32,14 @@ func (c *KafkaEventConsumer) Consume(topic string) (<-chan domain.OrderEvent, er
 		for {
 			msg, err := c.reader.ReadMessage(context.Background())
 			if err != nil {
-				log.Fatal("❌ Erro | Consumer Kafka: ", err)
+				log.Println("❌ Erro | Consumer Kafka: ", err)
+				continue
 			}
 
 			var event domain.OrderEvent
 			if err := json.Unmarshal(msg.Value, &event); err != nil {
-				log.Fatal("❌ Erro | Unmarshall: ", err)
+				log.Println("❌ Erro | Unmarshall: ", err)
+				continue
 			}
 
 			log.Printf("📥 Evento recebido do Kafka: %+v", event)

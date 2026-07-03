@@ -23,7 +23,10 @@ type CreateOrderOutput struct {
 }
 
 func CreateNewOrder(repo port.OrderRepository, publisher port.OrderPublisher) *CreateOrder {
-	return &CreateOrder{repo, publisher}
+	return &CreateOrder{
+		repo:      repo,
+		publisher: publisher,
+	}
 }
 
 func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*CreateOrderOutput, error) {

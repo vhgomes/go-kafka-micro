@@ -27,7 +27,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := h.createOrder.SaveOrder(items)
+	output, err := h.createOrder.SaveOrder(r.Context(), items)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

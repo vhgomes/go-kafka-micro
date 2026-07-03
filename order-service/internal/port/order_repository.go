@@ -1,7 +1,10 @@
 package port
 
-import "order-service/internal/domain"
+import (
+	"context"
+	"order-service/internal/domain"
+)
 
 type OrderRepository interface {
-	Save(order *domain.Order) error
+	Save(ctx context.Context, order *domain.Order) error
 }

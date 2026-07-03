@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"order-service/internal/domain"
 	"order-service/internal/port"
 	"sync"
@@ -17,7 +18,7 @@ func NewInMemoryOrderRepository() port.OrderRepository {
 	}
 }
 
-func (i *InMemoryOrderRepository) Save(order *domain.Order) error {
+func (i *InMemoryOrderRepository) Save(ctx context.Context, order *domain.Order) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 

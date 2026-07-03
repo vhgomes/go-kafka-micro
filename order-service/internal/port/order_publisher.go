@@ -1,7 +1,10 @@
 package port
 
-import "order-service/internal/domain"
+import (
+	"context"
+	"order-service/internal/domain"
+)
 
 type OrderPublisher interface {
-	Publish(d *domain.Order) error
+	Publish(ctx context.Context, d *domain.Order) error
 }

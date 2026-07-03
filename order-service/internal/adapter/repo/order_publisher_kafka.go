@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/segmentio/kafka-go"
 	"log"
 	"order-service/internal/domain"
 	"order-service/internal/port"
+
+	"github.com/segmentio/kafka-go"
 )
 
 type KafkaOrderPublisher struct {
@@ -25,7 +26,7 @@ func NewKafkaOrderPublisher(brokers []string, topic string) port.OrderPublisher 
 	}
 }
 
-func (o KafkaOrderPublisher) Publish(order *domain.Order) error {
+func (o KafkaOrderPublisher) Publish(ctx context.Context, order *domain.Order) error {
 	payload, err := json.Marshal(order)
 
 	if err != nil {

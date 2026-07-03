@@ -1,20 +1,21 @@
 package domain
 
 import (
-	"github.com/google/uuid"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Item struct {
 	Name     string
 	Quantity int
-	Price    float32
+	Price    int64 // Lembrando que esse valor é em centavos
 }
 
 type Order struct {
 	OrderId     uuid.UUID
 	Items       []Item
-	TotalAmount float32
+	TotalAmount int64 // Lembrando que esse valor é em centavos
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

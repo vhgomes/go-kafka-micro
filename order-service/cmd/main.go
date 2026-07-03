@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	kafkaBroker := os.Getenv("KAFKA_BROKER")
+	kafkaBroker := os.Getenv("KAFKA_BROKER_ADDRESS")
 	if kafkaBroker == "" {
 		kafkaBroker = "localhost:9092"
 	}

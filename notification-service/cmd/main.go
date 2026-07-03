@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	kafkaBroker := os.Getenv("KAFKA_BROKER")
+	kafkaBroker := os.Getenv("KAFKA_BROKER_ADDRESS")
 	if kafkaBroker == "" {
 		kafkaBroker = "localhost:9092"
 	}
@@ -61,7 +61,9 @@ func main() {
 	log.Println("🛑 Sinal de parada recebido. Iniciando Graceful Shutdown...")
 	cancel()
 
-	time.Sleep(3 * time.Second)
+	if err := consumer.Close(); err != nil {
+		log.Printf("⚠️ Erro ao fechar o consumer: %v", err)
+	}
 
 	log.Println("👋 Notification Service desligado com segurança.")
 }

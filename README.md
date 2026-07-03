@@ -1,8 +1,10 @@
-# go-kafka-micro
+# Go Kafka Microservices
 
-Microserviços em Go integrados via Apache Kafka, seguindo arquitetura hexagonal (ports & adapters). Dois serviços independentes, comunicação assíncrona por eventos.
+Sistema de exemplo construído com arquitetura de microsserviços em Go, utilizando Apache Kafka para comunicação assíncrona e orientada a eventos.
 
-## Arquitetura
+## 🏗 Arquitetura
+
+O projeto é composto por dois serviços independentes que seguem os princípios da Arquitetura Hexagonal (Ports & Adapters):
 
 ```text
 ┌─────────────────┐        orders.created         ┌───────────────────────┐
@@ -12,126 +14,163 @@ Microserviços em Go integrados via Apache Kafka, seguindo arquitetura hexagonal
         │                                                     │
         ▼                                                     ▼
   InMemoryOrderRepository                            LogNotificationSender
-```
-
-- **order-service**: expõe HTTP para criação de pedidos, persiste (in-memory) e publica evento `orders.created` no Kafka.
-- **notification-service**: consome `orders.created` e dispara notificação (atualmente logada em stdout).
-
-Cada serviço segue a mesma estrutura interna:
 
 ```
-internal/
-  domain/    # entidades de negócio
-  port/      # interfaces (contratos)
-  usecase/   # regras de aplicação
-  adapter/   # implementações concretas (HTTP, Kafka, memória)
-```
 
-## Stack
+* **order-service**: Expõe uma API HTTP para a criação de pedidos. Salva o pedido em memória e publica o evento `orders.created` no Kafka.
+* **notification-service**: Atua como um worker em background (Consumer) ouvindo o tópico `orders.created` e processando o envio de notificações (atualmente via stdout/logs).
+
+## 🚀 Tecnologias Utilizadas
 
 | Componente | Tecnologia |
-|---|---|
-| Linguagem | Go 1.23+ |
-| Mensageria | Apache Kafka (`segmentio/kafka-go`) |
-| IDs | `google/uuid` |
-| Orquestração local | Docker Compose |
-| UI de inspeção Kafka | Kafdrop |
+| --- | --- |
+| **Linguagem** | Go 1.23+ |
+| **Mensageria** | Apache Kafka (modo KRaft, sem Zookeeper) via `segmentio/kafka-go` |
+| **Identificadores** | `google/uuid` |
+| **Orquestração** | Docker & Docker Compose (Multi-stage builds) |
+| **Monitoramento** | Kafdrop (UI para inspeção do Kafka) |
+| **Automação** | Makefile |
 
-## Pré-requisitos
+## ⚙️ Pré-requisitos
 
-- [Go 1.23+](https://golang.org/dl/)
-- [Docker](https://www.docker.com/products/docker-desktop) + [Docker Compose](https://docs.docker.com/compose/)
+* [Go 1.23+](https://go.dev/dl/)
+* [Docker](https://www.docker.com/products/docker-desktop) e Docker Compose
+* `make` instalado (opcional, mas recomendado)
 
-## Como rodar (desenvolvimento local)
+## 🛠 Como Executar
 
-Suba a infraestrutura (Zookeeper + Kafka + Kafdrop):
+O projeto possui um `Makefile` completo para facilitar a execução. Você tem duas opções de ambiente:
+
+### Opção 1: 100% via Docker (Recomendado para testes)
+
+Sobe toda a infraestrutura e os dois serviços Go em containers isolados.
 
 ```bash
-docker-compose up zookeeper kafka kafdrop
+# Constrói as imagens e sobe os containers em background
+make docker-build
+make docker-up
+
+# Para acompanhar os logs
+make docker-logs
+
+# Para desligar e limpar tudo
+make docker-down
+
 ```
 
-Em terminais separados, rode cada serviço direto com Go (fora do container, apontando para `localhost:9092`):
+### Opção 2: Híbrido (Ideal para desenvolvimento)
+
+Sobe o Kafka via Docker, mas roda os serviços localmente no seu terminal para facilitar o *hot-reload* e *debug*.
 
 ```bash
-# order-service
-cd order-service
-go run ./cmd
+# 1. Suba apenas a infraestrutura do Kafka e Kafdrop
+docker-compose up -d kafka kafdrop
 
-# notification-service
-cd notification-service
-go run ./cmd
+# 2. Em seguida, rode os serviços Go localmente
+make run
+
+# 3. Para parar a execução local dos serviços
+make stop
+
 ```
 
-- Kafdrop disponível em `http://localhost:9000` para inspecionar os tópicos.
-- order-service disponível em `http://localhost:8080`.
+> **Acessos úteis:**
+> * **API Order Service:** `http://localhost:8080`
+> * **Kafdrop UI:** `http://localhost:9000`
+> 
+> 
 
-> **Nota:** rodar `order-service` e `notification-service` como containers via `docker-compose up` (todos os serviços) atualmente não conecta ao Kafka corretamente, pois o broker é anunciado em `localhost` e os serviços apontam para `localhost:9092` mesmo dentro da rede do compose. Até esse ajuste ser feito, use o fluxo acima (infra em container, serviços Go rodando localmente).
+---
 
-## API — order-service
+## 📖 Documentação da API (order-service)
 
 ### `POST /orders`
 
-Cria um pedido e publica o evento `orders.created`.
+Cria um novo pedido e dispara o evento no Kafka.
+*Nota: O valor de `Price` e `TotalAmount` é representado em centavos (int64).*
 
-**Request body:**
+**Request Body (JSON):**
 
 ```json
 [
   {
-    "Name": "Teclado mecânico",
+    "Name": "Teclado Mecânico",
     "Quantity": 1,
-    "Price": 350.0
+    "Price": 35000
+  },
+  {
+    "Name": "Mouse Gamer",
+    "Quantity": 2,
+    "Price": 15000
   }
 ]
+
+```
+
+**Exemplo via cURL:**
+
+```bash
+curl -X POST http://localhost:8080/orders \
+-H "Content-Type: application/json" \
+-d '[{"Name": "Teclado Mecânico", "Quantity": 1, "Price": 35000}]'
+
 ```
 
 **Response `201 Created`:**
 
 ```json
 {
-  "ID": "b3f1c2a0-...",
-  "TotalAmount": 350.0,
-  "CreatedAt": "2026-07-03T12:00:00Z"
+  "ID": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "TotalAmount": 65000,
+  "CreatedAt": "2026-07-03T17:00:00.000000Z"
 }
+
 ```
 
-**Erros:**
-- `400` — lista de itens vazia, quantidade inválida ou JSON malformado.
-- `500` — falha ao persistir ou publicar o evento.
+**Códigos de Erro:**
 
-## Evento Kafka — `orders.created`
+* `400 Bad Request` — Payload inválido, array vazio ou quantidade nula/negativa.
+* `405 Method Not Allowed` — Método HTTP diferente de POST.
+* `500 Internal Server Error` — Falha na persistência ou comunicação com o Kafka.
 
-Publicado pelo `order-service`, consumido pelo `notification-service`.
+---
+
+## 📦 Evento Kafka (`orders.created`)
+
+Estrutura da mensagem enviada para o tópico `orders.created`:
 
 ```json
 {
-  "UserID": "uuid",
-  "OrderID": "string",
-  "Total": 0,
+  "UserID": "uuid-do-usuario",
+  "OrderID": "uuid-do-pedido",
+  "Total": 65000,
   "Items": [
-    { "ProductID": "string", "Quantity": 0, "Price": 0 }
+    {
+      "ProductID": "string",
+      "Quantity": 1,
+      "Price": 35000
+    }
   ]
 }
+
 ```
 
-## Estrutura do repositório
+## 📁 Estrutura de Diretórios
 
 ```text
-order-service/
-  cmd/main.go
-  internal/
-    adapter/handlers/     # HTTP handler + router
-    adapter/repo/         # publisher Kafka + repositório in-memory
-    domain/                # entidade Order
-    port/                  # interfaces OrderRepository, OrderPublisher
-    usecase/                # CreateOrder
-notification-service/
-  cmd/main.go
-  internal/
-    adapter/events/         # consumer Kafka
-    adapter/sender/         # notificação (log)
-    domain/                  # Notification, OrderEvent
-    port/                    # interfaces EventConsumer, NotificationSender
-    usecase/                  # SendNotification
-docker-compose.yaml           # Zookeeper, Kafka, Kafdrop, serviços Go
+.
+├── notification-service/
+│   ├── cmd/main.go               # Entrypoint do worker
+│   ├── internal/                 # Domínio, Casos de uso e Adapters (Kafka Consumer)
+│   ├── Dockerfile                # Multi-stage build
+│   └── go.mod
+├── order-service/
+│   ├── cmd/main.go               # Entrypoint da API
+│   ├── internal/                 # Domínio, Casos de uso, Adapters (HTTP Handler, Kafka Publisher)
+│   ├── Dockerfile                # Multi-stage build
+│   └── go.mod
+├── docker-compose.yaml           # Configuração KRaft, Kafdrop e redes
+├── Makefile                      # Automação de comandos (build, run, lint, docker)
+└── README.md
+
 ```

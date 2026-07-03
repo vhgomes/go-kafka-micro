@@ -1,4 +1,3 @@
-```makefile
 # =============================================================================
 # Makefile para Go Kafka Microservices
 # =============================================================================
@@ -80,15 +79,28 @@ build-notification:
 # Execução Local (requer Kafka em execução)
 # =============================================================================
 .PHONY: run run-order run-notification
-run: run-order run-notification ## Executa ambos os serviços (em foreground, use Ctrl+C para parar)
+run: build ## Executa ambos os serviços em segundo plano (use 'make stop' para parar)
+	@printf "$(COLOR_YELLOW)▶ Iniciando order-service em background...$(COLOR_RESET)\n"
+	@$(ORDER_BIN) &
+	@printf "$(COLOR_YELLOW)▶ Iniciando notification-service em background...$(COLOR_RESET)\n"
+	@$(NOTIFICATION_BIN) &
+	@printf "$(COLOR_GREEN)✔ Serviços em execução. Para parar, use 'make stop' ou 'pkill -f order-service; pkill -f notification-service'$(COLOR_RESET)\n"
 
 run-order: build-order
-	@printf "$(COLOR_YELLOW)▶ Iniciando order-service...$(COLOR_RESET)\n"
+	@printf "$(COLOR_YELLOW)▶ Iniciando order-service (foreground)...$(COLOR_RESET)\n"
 	@$(ORDER_BIN)
 
 run-notification: build-notification
-	@printf "$(COLOR_YELLOW)▶ Iniciando notification-service...$(COLOR_RESET)\n"
+	@printf "$(COLOR_YELLOW)▶ Iniciando notification-service (foreground)...$(COLOR_RESET)\n"
 	@$(NOTIFICATION_BIN)
+
+# Parar serviços em background
+.PHONY: stop
+stop:
+	@printf "$(COLOR_YELLOW)▶ Parando serviços...$(COLOR_RESET)\n"
+	@pkill -f order-service || true
+	@pkill -f notification-service || true
+	@printf "$(COLOR_GREEN)✔ Serviços parados$(COLOR_RESET)\n"
 
 # =============================================================================
 # Testes
@@ -164,47 +176,3 @@ clean: ## Remove binários e arquivos temporários
 	rm -f $(ORDER_SERVICE_DIR)/*.test $(NOTIFICATION_SERVICE_DIR)/*.test
 	rm -f $(ORDER_SERVICE_DIR)/coverage.out $(NOTIFICATION_SERVICE_DIR)/coverage.out
 	@printf "$(COLOR_GREEN)✔ Limpeza concluída$(COLOR_RESET)\n"
-```
-
-## 📝 Como usar
-
-### Comandos básicos
-
-| Comando | Descrição |
-|---------|-----------|
-| `make help` | Mostra a lista de comandos disponíveis |
-| `make build` | Compila ambos os serviços |
-| `make run` | Executa ambos os serviços localmente (requer Kafka em execução) |
-| `make docker-up` | Sobe todos os containers via Docker Compose |
-| `make docker-down` | Derruba todos os containers |
-| `make clean` | Remove binários e arquivos temporários |
-
-### Exemplos de uso
-
-```bash
-# Compilar os serviços
-make build
-
-# Subir a stack completa com Docker
-make docker-up
-
-# Ver logs de todos os serviços
-make docker-logs
-
-# Testar localmente (com Kafka em execução)
-make run
-
-# Limpar arquivos gerados
-make clean
-```
-
-### Observações
-
-- O alvo `run` pressupõe que o Kafka esteja em execução (localmente ou via Docker).
-- Os binários são gerados no diretório `bin/`.
-- O alvo `docker-build` utiliza o `docker-compose.yaml` da raiz.
-- Os alvos de `lint` exigem o `golangci-lint` instalado; caso contrário, você pode removê-los ou adicionar verificação de disponibilidade.
-
----
-
-**💡 Dica:** Para adicionar mais serviços no futuro, basta estender as variáveis `ORDER_SERVICE_DIR` e criar novos alvos correspondentes.

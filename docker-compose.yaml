@@ -1,41 +1,33 @@
-version: "3.9"
-
 services:
-  zookeeper:
-    image: zookeeper:3.8.1
-    container_name: zookeeper
-    ports:
-      - "2181:2181"
-    environment:
-      ZOO_MY_ID: 1
-      ZOO_PORT: 2181
-
   kafka:
-    image: bitnami/kafka:3.7
+    image: confluentinc/cp-kafka:7.6.0
     container_name: kafka
     ports:
       - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://:9092
-      # Correção: anuncia o broker com o nome do serviço na rede Docker
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-    depends_on:
-      - zookeeper
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:29092,PLAINTEXT_EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:29092,PLAINTEXT_EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@127.0.0.1:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - monitoring
     healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-topics.sh",
-          "--bootstrap-server",
-          "localhost:9092",
-          "--list",
-        ]
+      test: ["CMD-SHELL", "cat < /dev/null > /dev/tcp/127.0.0.1/9092"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
   kafdrop:
     image: obsidiandynamics/kafdrop:3.28.0
@@ -45,8 +37,11 @@ services:
     environment:
       KAFKA_BROKERCONNECT: kafka:9092
       JVM_OPTS: "-Xms32M -Xmx64M"
+    networks:
+      - monitoring
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 
   order-service:
     build:
@@ -54,9 +49,11 @@ services:
       dockerfile: Dockerfile
     container_name: order-service
     ports:
-      - "8080:8080" # ajuste conforme necessário
+      - "8080:8080"
     environment:
-      - KAFKA_BROKER_ADDRESS=kafka:9092 # variável esperada pelo serviço (exemplo)
+      - KAFKA_BROKER_ADDRESS=kafka:9092
+    networks:
+      - monitoring
     depends_on:
       kafka:
         condition: service_healthy
@@ -67,9 +64,19 @@ services:
       dockerfile: Dockerfile
     container_name: notification-service
     ports:
-      - "8081:8081" # ajuste conforme necessário
+      - "8081:8081"
     environment:
       - KAFKA_BROKER_ADDRESS=kafka:9092
+    networks:
+      - monitoring
     depends_on:
       kafka:
         condition: service_healthy
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  kafka_data:
+    driver: local

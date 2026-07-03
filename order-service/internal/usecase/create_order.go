@@ -31,13 +31,13 @@ func CreateNewOrder(repo port.OrderRepository, publisher port.OrderPublisher) *C
 
 func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*CreateOrderOutput, error) {
 	if len(itens) == 0 {
-		return nil, fmt.Errorf("você precisa enviar itens")
+		return nil, fmt.Errorf("you need to send items")
 	}
 
 	var total int64 = 0
 	for _, item := range itens {
 		if item.Quantity <= 0 {
-			return nil, fmt.Errorf("quantidade de item invalido")
+			return nil, fmt.Errorf("invalid item quantity")
 		}
 		total += item.Price
 	}
@@ -50,11 +50,11 @@ func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*Cre
 	}
 
 	if err := co.repo.Save(ctx, &order); err != nil {
-		return nil, fmt.Errorf("falha no repositorio: erro ao salvar")
+		return nil, fmt.Errorf("repository failure: error saving order")
 	}
 
 	if err := co.publisher.Publish(ctx, &order); err != nil {
-		return nil, fmt.Errorf("falha no publisher: erro ao publicar a mensagem de ordem criada")
+		return nil, fmt.Errorf("publisher failure: error publishing order created message")
 	}
 
 	return &CreateOrderOutput{

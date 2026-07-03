@@ -2,7 +2,7 @@ package usecase
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"order-service/internal/domain"
 	"order-service/internal/port"
 
@@ -28,13 +28,13 @@ func CreateNewOrder(repo port.OrderRepository, publisher port.OrderPublisher) *C
 
 func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*CreateOrderOutput, error) {
 	if len(itens) == 0 {
-		return nil, errors.New("você precisa enviar itens")
+		return nil, fmt.Errorf("você precisa enviar itens")
 	}
 
 	var total int64 = 0
 	for _, item := range itens {
 		if item.Quantity <= 0 {
-			return nil, errors.New("quantidade de item invalido")
+			return nil, fmt.Errorf("quantidade de item invalido")
 		}
 		total += item.Price
 	}
@@ -47,11 +47,11 @@ func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*Cre
 	}
 
 	if err := co.repo.Save(ctx, &order); err != nil {
-		return nil, errors.New("falha no repositorio: erro ao salvar")
+		return nil, fmt.Errorf("falha no repositorio: erro ao salvar")
 	}
 
 	if err := co.publisher.Publish(ctx, &order); err != nil {
-		return nil, errors.New("falha no publisher: erro ao publicar a mensagem de ordem criada")
+		return nil, fmt.Errorf("falha no publisher: erro ao publicar a mensagem de ordem criada")
 	}
 
 	return &CreateOrderOutput{

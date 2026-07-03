@@ -24,7 +24,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	var items []domain.Item
 
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&items); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10*1024*1024)).Decode(&items); err != nil {
 		log.Printf("Erro ao decodificar request: %v", err)
 		http.Error(w, "invalid request payload", http.StatusBadRequest)
 		return
@@ -38,6 +38,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	err = json.NewEncoder(w).Encode(output)
 	if err != nil {
 		log.Printf("Erro ao encodar resposta: %v", err)

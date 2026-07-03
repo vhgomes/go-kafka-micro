@@ -1,210 +1,163 @@
-# Code Review — go-kafka-micro (order-service + notification-service)
+# Code Review v2 — go-kafka-micro (delta desde a última revisão)
 
-**Serviços analisados:** `order-service`, `notification-service`
-**Padrão:** arquitetura hexagonal (domain/port/usecase/adapter)
+**Base de comparação:** `code-review-go-kafka-micro.md` (v1, também versionado no repo como `refactor.md`)
+**Mudanças no repo desde então:** Dockerfiles multi-stage, Makefile, `.env.example`, `.gitignore`, docker-compose reescrito (KRaft, sem Zookeeper), graceful shutdown no order-service, `int64` para dinheiro, context propagation nas assinaturas.
 
----
+## Resumo da evolução
 
-## Checklist Geral
+| | Quantidade |
+|---|---|
+| ✅ Corrigidos de fato | 15 |
+| ⚠️ Parcialmente corrigidos / com regressão | 5 |
+| 🆕 Novos problemas | 4 |
+| 🔴 Ainda não corrigidos | 1 |
 
-- [ ] 6 problemas **CRÍTICOS** corrigidos
-- [ ] 7 problemas **IMPORTANTES** corrigidos
-- [ ] 6 **melhorias** aplicadas
-
----
-
-## ⚠️ Problemas Encontrados
-
-### order-service
-
-#### [CRÍTICO] — Lógica invertida no method check do handler HTTP
-**Localização:** `order-service/internal/adapter/handlers/order_handler.go:19-22`
-**Problema:** A condição rejeita exatamente o método que deveria aceitar:
-`if r.Method == http.MethodPost { http.Error(...); return }`. Isso bloqueia todo POST e deixa passar GET, PUT, DELETE etc. para o fluxo de criação de pedido.
-**Impacto:** A API está funcionalmente quebrada — nenhum client real consegue criar pedido via POST. Qualquer outro verbo (que deveria ser rejeitado) executa a lógica de criação.
-**Correção:** Inverta a condição para `r.Method != http.MethodPost`.
-
-- [ ] Corrigir
-
-#### [CRÍTICO] — Handler não retorna após `http.Error`
-**Localização:** `order_handler.go:26-27`, `:30-31`, `:36-37`
-**Problema:** Em três pontos (decode do body, `SaveOrder`, `Encode` da resposta), `http.Error` é chamado mas a função continua executando em vez de dar `return`.
-**Impacto:** Após erro de decode, o código segue chamando `SaveOrder` com `items` vazio/inválido; após erro em `SaveOrder`, tenta `Encode(output)` com `output == nil`; e o handler pode tentar escrever múltiplos headers/bodies na mesma resposta (`http: superfluous response.WriteHeader call`).
-**Correção:** Adicione `return` imediatamente após cada chamada de `http.Error`.
-
-- [ ] Corrigir
-
-#### [CRÍTICO] — `float32` para valores monetários
-**Localização:** `order-service/internal/domain/order.go:11,17` (`Price`, `TotalAmount`)
-**Problema:** Ponto flutuante não representa valores decimais de forma exata.
-**Impacto:** Erros de arredondamento acumulados no cálculo de `TotalAmount` (`create_order.go:37`, soma de `Quantity * Price`) geram valores monetários incorretos — problema clássico e caro de corrigir depois que já há dados em produção.
-**Correção:** Represente dinheiro como inteiro (centavos, `int64`) ou use um tipo decimal (ex. `shopspring/decimal`). Nunca `float32`/`float64` para moeda.
-
-- [ ] Corrigir
-
-#### [CRÍTICO] — Kafka Writer/Reader nunca fechados, sem graceful shutdown
-**Localização:** `order-service/cmd/main.go` (writer nunca fechado) e `notification-service/internal/adapter/events/kakfa_event_consumer.go` (reader nunca fechado)
-**Problema:** Nenhum dos dois serviços trata `SIGTERM`/`SIGINT`, nem chama `writer.Close()`/`reader.Close()`. O `http.ListenAndServe` do order-service também não tem shutdown gracioso.
-**Impacto:** Em deploy, scale-down ou restart, conexões com o Kafka ficam penduradas, requisições em voo são abortadas sem resposta ao client, e mensagens em processamento no notification-service podem ser perdidas ou reprocessadas de forma inconsistente.
-**Correção:** Capture sinais de SO, propague um `context.Context` cancelável até writer/reader/HTTP server, e use `http.Server.Shutdown(ctx)` + `reader.Close()`/`writer.Close()` no encerramento.
-
-- [ ] Corrigir
-
-#### [IMPORTANTE] — `context.Context` nunca propagado nas operações de I/O
-**Localização:** `order_publisher_kafka.go:40` (`context.Background()`), `create_order.go` (`SaveOrder` sem `ctx`), `kakfa_event_consumer.go:32` (`context.Background()`)
-**Problema:** Toda a cadeia usecase → repo/publisher → Kafka roda sobre `context.Background()`. Nenhuma função aceita `ctx` como primeiro parâmetro.
-**Impacto:** Impossível aplicar timeout numa escrita/leitura Kafka lenta ou cancelar operações em andamento no shutdown; `r.Context()` no handler HTTP também nunca é usado.
-**Correção:** Adicione `ctx context.Context` como primeiro parâmetro em `SaveOrder`, `Publish` e `Consume`, propagando a partir de `r.Context()` no handler e de um `ctx` derivado de signal handling no consumer.
-
-- [ ] Corrigir
-
-#### [IMPORTANTE] — Erros perdem o chain original
-**Localização:** `order_publisher_kafka.go:32,42`, `create_order.go:48,52`
-**Problema:** Erros criados com `errors.New("mensagem: " + err.Error())` em vez de `fmt.Errorf("mensagem: %w", err)`.
-**Impacto:** Quebra `errors.Is`/`errors.As` na cadeia de chamadas — quem consome esse erro não consegue detectar a causa raiz programaticamente (ex.: diferenciar falha de conexão Kafka de erro de serialização), só via string matching.
-**Correção:** Troque toda concatenação de erro por `fmt.Errorf("...: %w", err)`.
-
-- [ ] Corrigir
-
-#### [IMPORTANTE] — Body da requisição HTTP sem limite de tamanho
-**Localização:** `order_handler.go:24-27` (`json.NewDecoder(r.Body)`)
-**Problema:** Nenhum limite é aplicado ao body antes do decode.
-**Impacto:** Um client malicioso ou buggy pode enviar payload arbitrariamente grande, consumindo memória do processo até esgotar recursos — DoS trivial num endpoint público.
-**Correção:** Envolva `r.Body` com `http.MaxBytesReader(w, r.Body, limite)` antes do `NewDecoder`.
-
-- [ ] Corrigir
-
-#### [MELHORIA] — Endereço do broker Kafka hardcoded
-**Localização:** `order-service/cmd/main.go:14-17`
-**Problema:** `"localhost:9092"` fixo no código.
-**Impacto:** Impossibilita rodar em ambientes diferentes (compose, k8s, staging) sem recompilar — é a causa direta do bug de conectividade descrito na seção de docker-compose abaixo.
-**Correção:** Leia de variável de ambiente (`KAFKA_BROKERS`) com fallback para `localhost:9092` em dev.
-
-- [ ] Corrigir
-
-#### [MELHORIA] — Inicialização posicional de struct
-**Localização:** `create_order.go:24` — `&CreateOrder{repo, publisher}`
-**Problema:** Uber Style Guide recomenda named fields em construtores.
-**Impacto:** Baixo agora (2 campos), mas escala mal — reordenar os campos do struct pode quebrar o construtor silenciosamente se os tipos coincidirem, sem erro de compilação.
-**Correção:** Use `&CreateOrder{repo: repo, publisher: publisher}`.
-
-- [ ] Corrigir
+Progresso real, mas **o bug mais importante da v1 — conectividade Kafka em container — continua de pé**, só que agora por um motivo diferente (e mais escondido).
 
 ---
 
-### notification-service
+## ✅ Corrigidos (confirmado no código novo)
 
-#### [CRÍTICO] — `package cmd` em vez de `package main`
-**Localização:** `notification-service/cmd/main.go:1`
-**Problema:** O arquivo tem `func main()` mas declara `package cmd`, não `package main`.
-**Impacto:** Um pacote `main` é exigido pelo toolchain do Go para gerar executável via `go build`/`go run`. Nesse estado, `go run ./cmd` ou `go build ./cmd` não produzem o binário esperado — o executável `notification-service` presente no repositório provavelmente veio de um build anterior a essa quebra, ou de um caminho de build diferente do documentado no README.
-**Correção:** Troque `package cmd` por `package main`.
-
-- [ ] Corrigir
-
-#### [CRÍTICO] — `log.Fatal` dentro da goroutine do consumer
-**Localização:** `kakfa_event_consumer.go:34,39`
-**Problema:** Qualquer erro de leitura do Kafka (`ReadMessage`) ou de `json.Unmarshal` chama `log.Fatal`, que executa `os.Exit(1)` imediatamente.
-**Impacto:** Um blip de rede, rebalance de partição ou uma mensagem malformada derruba o processo inteiro — sem retry, sem DLQ. Você já resolve esse tipo de cenário com padrão de DLQ em outros contextos; aqui não foi aplicado.
-**Correção:** Substitua `log.Fatal` por log de erro + `continue` (erro de leitura transitório) ou envio a uma DLQ (mensagem malformada). Nunca `os.Exit` dentro de uma goroutine de longa duração.
-
-- [ ] Corrigir
-
-#### [IMPORTANTE] — Dependência `EventConsumer` injetada mas nunca usada
-**Localização:** `notification-service/internal/usecase/send_notification.go:9,14`
-**Problema:** `SendNotification` recebe `consumer port.EventConsumer` no construtor e guarda no struct, mas `Execute` nunca chama `sn.consumer.Consume(...)` — quem consome o Kafka é o `main.go` diretamente, fora do usecase.
-**Impacto:** Dependência morta que engana quem lê o código — parece que o usecase orquestra o consumo, mas não orquestra. Contradiz a intenção de arquitetura hexagonal que o resto do projeto segue bem.
-**Correção:** Remova `consumer` de `SendNotification` (ele só precisa do `NotificationSender`), ou inverta a responsabilidade movendo o loop do `main.go` para dentro do usecase.
-
-- [ ] Corrigir
-
-#### [MELHORIA] — Nome de arquivo com typo
-**Localização:** `notification-service/internal/adapter/events/kakfa_event_consumer.go`
-**Problema:** "kakfa" em vez de "kafka".
-**Impacto:** Nenhum funcional, mas prejudica busca/grep e passa impressão de descuido em review externo.
-**Correção:** Renomeie para `kafka_event_consumer.go`.
-
-- [ ] Corrigir
+- [x] Lógica invertida do method check (`order_handler.go`) — agora `r.Method != http.MethodPost`
+- [x] `return` faltando após `http.Error` — presente nos três pontos
+- [x] `float32` para dinheiro — `Price`/`TotalAmount` agora `int64` (centavos)
+- [x] `package cmd` no notification-service — corrigido para `package main`
+- [x] `log.Fatal` dentro da goroutine do consumer — trocado por `log.Println` + `continue`
+- [x] Graceful shutdown do HTTP server no order-service — `SIGTERM`/`SIGINT` + `srv.Shutdown(ctx)`
+- [x] Body HTTP sem limite de tamanho — `http.MaxBytesReader(w, r.Body, 1024)`
+- [x] `bitnami/kafka:latest` — trocado por `confluentinc/cp-kafka:7.6.0` (pinado)
+- [x] Binários compilados versionados no repo — agora há `Dockerfile` multi-stage em cada serviço e `.gitignore` cobrindo os binários
+- [x] Inicialização posicional de struct (`CreateOrder`) — agora usa named fields
+- [x] Dependência `EventConsumer` morta no `SendNotification` — removida do usecase
+- [x] Typo `kakfa_event_consumer.go` — renomeado para `kafka_event_consumer.go`
+- [x] `err.Error()` exposto cru na resposta HTTP — agora retorna mensagem genérica + loga o erro real internamente
+- [x] Mistura de idiomas nas mensagens de erro do `create_order.go` — padronizado em inglês
+- [x] Ausência de healthcheck no Kafka — `docker-compose.yaml` agora tem `healthcheck` no serviço `kafka` com `depends_on: condition: service_healthy`
 
 ---
 
-### Infraestrutura (docker-compose.yaml)
+## ⚠️ Parcialmente corrigidos / com regressão
 
-#### [CRÍTICO] — Kafka anunciado em `localhost` quebra conectividade entre containers
-**Localização:** `docker-compose.yaml:22` (`KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092`) combinado com `order-service/cmd/main.go:15` e `notification-service/cmd/main.go:15`, ambos hardcoded para `localhost:9092`.
-**Problema:** Dentro da rede do Docker Compose, `localhost` no container `order-service` aponta para o próprio container, não para o container `kafka`. O broker está anunciado como acessível apenas em `localhost`.
-**Impacto:** `order-service` e `notification-service`, quando rodados via `docker-compose up`, não conseguem se conectar ao Kafka — a stack não sobe funcional em container, só quando rodada localmente na máquina host.
-**Correção:** Anuncie o listener usando o nome do serviço na rede compose (`KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092`) e troque o broker address hardcoded nos `main.go` para vir de env var.
+#### [CRÍTICO] — Conectividade Kafka em container: ainda quebrada, causa mudou
 
-- [ ] Corrigir
+**Localização:** `order-service/cmd/main.go:14-16` + `notification-service/cmd/main.go:14-17` + `docker-compose.yaml`
+**O que mudou:** O `docker-compose.yaml` agora está correto — `KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:29092,PLAINTEXT_EXTERNAL://localhost:9092` é exatamente o padrão certo para expor Kafka tanto para containers (`kafka:29092`) quanto para o host (`localhost:9092`).
+**Problema:** Nenhum dos dois serviços usa o listener interno. `order-service` faz `os.Setenv("KAFKA_BROKER", "localhost:9092")` **antes** de ler a variável — ou seja, sobrescreve incondicionalmente qualquer valor injetado pelo ambiente, e ainda lê uma chave (`KAFKA_BROKER`) diferente da que o `docker-compose.yaml` define (`KAFKA_BROKER_ADDRESS`). `notification-service` nem tenta: brokers continuam 100% hardcoded em `[]string{"localhost:9092"}`.
+**Impacto:** Rodando via `docker-compose up`, os dois serviços ainda tentam falar com `localhost:9092` de dentro do próprio container, que não é o Kafka. O compose está pronto para funcionar, mas o código nunca vai usar o listener certo.
+**Correção:** Em `order-service`, remova o `os.Setenv` e leia `KAFKA_BROKER_ADDRESS` diretamente (com fallback pra `localhost:9092` só se a env var não existir). Em `notification-service`, adicione a mesma leitura de env var — hoje não existe nenhuma.
 
-#### [IMPORTANTE] — Imagem `bitnami/kafka:latest`
-**Localização:** `docker-compose.yaml:14`
-**Problema:** Tag `latest` usada para a imagem do Kafka — contraria a diretriz do seu próprio stack (versão sempre pinada).
-**Impacto:** Build não é reproduzível; um `docker-compose pull` futuro pode trazer versão do Kafka com breaking changes de configuração sem aviso prévio.
-**Correção:** Pin em versão específica, ex. `bitnami/kafka:3.7`.
+- [x] Corrigir
 
-- [ ] Corrigir
+#### [IMPORTANTE] — `notification-service` não ganhou o graceful shutdown
 
-#### [IMPORTANTE] — Binários compilados versionados no repositório
-**Localização:** `order-service/order-service`, `notification-service/notification-service` (presentes na árvore do repo)
-**Problema:** Executáveis compilados estão commitados junto com o código-fonte.
-**Impacto:** Repositório infla a cada build, diffs de binário poluem o histórico do git, e há risco de rodar um binário desatualizado em relação ao código-fonte — como parece ser o caso do bug `package cmd` acima.
-**Correção:** Adicione os binários ao `.gitignore` e faça build via Dockerfile multi-stage em vez de montar volume + rodar binário pré-compilado.
+**Localização:** `notification-service/cmd/main.go`
+**O que mudou:** `order-service` ganhou tratamento de `SIGTERM`/`SIGINT` com shutdown gracioso.
+**Problema:** `notification-service` continua sem tratar sinais e sem fechar o `reader` do Kafka — o `for event := range eventsCh` roda indefinidamente sem via de saída limpa.
+**Impacto:** Em restart/scale-down, o consumer é morto abruptamente; mensagens em processamento podem ser perdidas ou reprocessadas de forma inconsistente no próximo rebalance.
+**Correção:** Replique o padrão do `order-service`: capture o sinal, cancele um `context.Context`, e chame `reader.Close()` no encerramento.
 
-- [ ] Corrigir
+- [x] Corrigir
 
-#### [MELHORIA] — Sem healthcheck nos serviços Go
-**Localização:** `docker-compose.yaml:37-55`
-**Problema:** `order-service` e `notification-service` não têm `healthcheck` definido.
-**Impacto:** `depends_on: - kafka` só espera o container do Kafka *iniciar*, não estar pronto para aceitar conexões — race condition clássica de startup.
-**Correção:** Adicione `healthcheck` no serviço `kafka` e use `depends_on: kafka: condition: service_healthy` nos serviços Go.
+#### [IMPORTANTE] — `context.Context` propagado na assinatura, mas ignorado na prática
 
-- [ ] Corrigir
+**Localização:** `order_publisher_kafka.go` (`Publish` recebe `ctx` mas chama `o.writer.WriteMessages(context.Background(), message)`), `kakfa_event_consumer.go:32` (`ReadMessage(context.Background())`, nunca mudou)
+**O que mudou:** `SaveOrder`, `Publish` e `Save` agora aceitam `ctx context.Context` como parâmetro, e o handler passa `r.Context()`.
+**Problema:** O `ctx` chega até o publisher mas não é usado na chamada real ao Kafka — o parâmetro existe só de fachada. O consumer nem recebe `ctx` na assinatura.
+**Impacto:** Ainda não é possível cancelar ou aplicar timeout numa escrita/leitura Kafka lenta, mesmo com a propagação "pronta" na maior parte da cadeia.
+**Correção:** Troque `context.Background()` por `ctx` dentro de `Publish`. Adicione `ctx` como parâmetro de `Consume`/`ReadMessage` também.
 
----
+- [x] Corrigir
 
-### Cross-cutting
+#### [IMPORTANTE] — Erros de infraestrutura perdem a causa raiz por completo
 
-#### [IMPORTANTE] — Nenhum teste automatizado no repositório
-**Localização:** repositório inteiro (zero arquivos `*_test.go`)
-**Problema:** Não há cobertura de teste para usecases, handlers ou adapters.
-**Impacto:** As regras de negócio em `create_order.go` (validação de item, cálculo de total) e o bug do method check invertido no handler não seriam pegos por CI algum — dependem 100% de teste manual.
-**Correção:** Priorize testes de unidade para `CreateOrder.SaveOrder` (casos de item vazio/quantidade inválida) e um teste de integração HTTP para `OrderHandler.CreateOrder` — isso já teria capturado o bug crítico #1.
+**Localização:** `create_order.go:665,669` — `fmt.Errorf("repository failure: error saving order")`, `fmt.Errorf("publisher failure: error publishing order created message")`
+**O que mudou:** A v1 pelo menos concatenava `err.Error()` na mensagem (formato errado, mas a informação sobrevivia). Agora o `err` retornado por `repo.Save`/`publisher.Publish` é descartado inteiramente — nem aparece na string.
+**Impacto:** Regressão de debugabilidade: um erro de conexão com Kafka e um erro de serialização geram exatamente a mesma mensagem (`"publisher failure: error publishing order created message"`), sem nenhuma pista de qual foi a causa real.
+**Correção:** Use `fmt.Errorf("repository failure: %w", err)` / `fmt.Errorf("publisher failure: %w", err)` — preserva a causa e ainda permite `errors.Is`/`errors.As`.
 
-- [ ] Corrigir
+- [x] Corrigir
 
-#### [MELHORIA] — Mistura de idiomas em mensagens de erro
-**Localização:** `create_order.go:29,35` ("você precisa enviar itens") vs. `order_publisher_kafka.go:32,42` (mensagens técnicas em inglês)
-**Problema:** Erros de domínio em PT-BR, erros de infra em EN, sem padrão definido.
-**Impacto:** Inconsistência em logs agregados e em mensagens potencialmente expostas ao client.
-**Correção:** Padronize o idioma das mensagens internas (recomendo EN, dado o restante do código e a stack).
+#### [IMPORTANTE] — `fmt.Errorf` chamado com string concatenada (sem verbo de formatação)
 
-- [ ] Corrigir
+**Localização:** `order_publisher_kafka.go:509,519` — `fmt.Errorf("KafkaPublisher | PublishOrderCreated error: " + err.Error())`
+**O que mudou:** A v1 usava `errors.New(string + err.Error())`, que era funcionalmente "seguro" (só perdia o wrapping). Trocar para `fmt.Errorf` sem usar verbo `%w`/`%s` introduz um problema novo.
+**Problema:** `fmt.Errorf` com uma única string concatenada (sem argumentos) interpreta qualquer `%` que aparecer dentro de `err.Error()` como início de verbo de formatação.
+**Impacto:** Se a mensagem de erro do Kafka client alguma vez contiver um `%` (não é incomum em mensagens de rede/timeout), a mensagem final fica corrompida com `%!s(MISSING)` ou similar, escondendo o erro real — `go vet` já sinaliza esse padrão.
+**Correção:** `fmt.Errorf("KafkaPublisher | PublishOrderCreated error: %w", err)`.
 
-#### [MELHORIA] — `err.Error()` exposto diretamente na resposta HTTP
-**Localização:** `order_handler.go:26,31,37`
-**Problema:** `http.Error(w, err.Error(), ...)` devolve a mensagem de erro interna crua para o client da API.
-**Impacto:** Vaza detalhes de implementação (mensagens de erro do repo/publisher) para fora da fronteira do serviço. Não é uma vulnerabilidade grave aqui, mas é um hábito arriscado para levar a produção.
-**Correção:** Separe erros de domínio (retornáveis ao client) de erros de infraestrutura (logados internamente, resposta genérica ao client).
-
-- [ ] Corrigir
+- [x] Corrigir
 
 ---
 
-## ✅ Pontos Positivos
+## 🆕 Novos problemas encontrados
 
-- **Arquitetura hexagonal consistente (ports & adapters):** separação clara entre `domain`, `port`, `usecase` e `adapter` nos dois serviços, com interfaces (`OrderRepository`, `OrderPublisher`, `EventConsumer`, `NotificationSender`) desacoplando regra de negócio de infraestrutura. Isso facilita trocar `InMemoryOrderRepository` por Postgres+sqlc sem tocar no usecase.
-- **Injeção de dependência via construtores:** nenhum global, tudo passado explicitamente — mesmo padrão que você já aplica bem em outros projetos do portfólio.
+#### [MELHORIA] — README desalinhado com a implementação real
+
+**Localização:** `README.md` (seção "Endpoints da API" e exemplos de `curl`)
+**Problema:** O README documenta `POST /order` (singular) com body `{"itens": [...]}` e resposta `201 Created`; o código real expõe `POST /orders` (plural, ver `router.go`), espera um array JSON puro (`[{...}]`, sem wrapper), e o handler nunca chama `w.WriteHeader(201)` — a resposta de sucesso sai como `200 OK`.
+**Impacto:** Quem seguir o README literalmente (inclusive você, daqui a uns meses) vai receber `404` ou erro de decode ao copiar o exemplo de `curl`.
+**Correção:** Atualize o README com o path, formato de payload e status code reais, ou ajuste o handler para casar com o que está documentado — o que fizer mais sentido pro contrato da API.
+
+- [x] Corrigir
+
+#### [MELHORIA] — Porta 8081 do notification-service documentada mas inexistente
+
+**Localização:** `docker-compose.yaml:837` (`ports: "8081:8081"`), `README.md`, `Makefile` (`docker-up`)
+**Problema:** `notification-service` é um consumer Kafka puro — não há nenhum `http.ListenAndServe` no código. A porta 8081 mapeada no compose e anunciada no README/Makefile não corresponde a nada rodando de fato.
+**Impacto:** Confunde quem for validar o serviço via `curl http://localhost:8081` esperando alguma resposta.
+**Correção:** Remova o mapeamento de porta do compose (ou adicione um endpoint de health/metrics real se fizer sentido ter um).
+
+- [x] Corrigir
+
+#### [MELHORIA] — Limite de `MaxBytesReader` pode ser pequeno demais
+
+**Localização:** `order_handler.go:437` — `http.MaxBytesReader(w, r.Body, 1024)`
+**Problema:** 1024 bytes comporta ~12-15 itens de pedido, dependendo do tamanho do `Name`. Um carrinho legítimo maior que isso é rejeitado como se fosse payload malicioso.
+**Impacto:** Falso positivo de "payload grande demais" em uso normal, sem sinalização clara pro client do porquê.
+**Correção:** Extraia o limite pra uma constante nomeada com uma margem mais realista (ex.: 64KB) e documente a decisão.
+
+- [x] Corrigir
+
+#### [MELHORIA] — Typo em `.env.example`
+
+**Localização:** `.env.example:1` — `KAFKA_BROKER=="insira-aqui-o-seu-kafka-broker"`
+**Problema:** Sinal de igual duplicado (`==`).
+**Impacto:** Nenhum funcional (é só um exemplo), mas quem copiar o arquivo pra `.env` sem reparar herda a sintaxe quebrada.
+**Correção:** `KAFKA_BROKER="insira-aqui-o-seu-kafka-broker"`.
+
+- [x] Corrigir
 
 ---
 
-## Resumo por Severidade
+## ✅ Pontos Positivos Novos
+
+- **Dockerfiles multi-stage corretos:** builder em `golang:1.23-alpine`, runtime em `alpine:latest`, binário copiado — resolve builds reprodutíveis e imagem final enxuta, no lugar do hack de volume + binário pré-compilado.
+- **docker-compose migrado pra KRaft:** eliminar o Zookeeper e usar `confluentinc/cp-kafka` com dual-listener (`PLAINTEXT_INTERNAL`/`PLAINTEXT_EXTERNAL`) é o padrão certo pra esse problema — a configuração em si está correta, só falta o código Go acompanhar.
+- **Makefile completo:** `build`, `run`, `test`, `lint`, `docker-*`, `clean` — boa base de DX pro projeto, especialmente já prevendo `golangci-lint` e cobertura de teste.
+
+---
+
+## Checklist Atualizado (o que falta)
+
+- [ ] Corrigir leitura de broker Kafka no `order-service` (parar de sobrescrever a env var, usar `KAFKA_BROKER_ADDRESS`)
+- [ ] Adicionar leitura de broker via env var no `notification-service` (hoje inexistente)
+- [ ] Graceful shutdown + `reader.Close()` no `notification-service`
+- [ ] Usar o `ctx` recebido dentro de `Publish` (trocar `context.Background()`)
+- [ ] Propagar `ctx` até `Consume`/`ReadMessage`
+- [ ] Voltar a incluir a causa raiz (`%w`) nos erros de `create_order.go`
+- [ ] Trocar concatenação por `%w` em `order_publisher_kafka.go` (evita o risco de formatting directive)
+- [ ] Alinhar README com a API real (path, payload, status code)
+- [ ] Remover ou justificar a porta 8081 do notification-service no compose
+- [ ] Revisar limite do `MaxBytesReader`
+- [ ] Corrigir `.env.example`
+- [ ] Escrever os primeiros testes (`CreateOrder.SaveOrder` + handler HTTP)
+
+## Resumo por Severidade (itens ainda abertos)
 
 | Severidade | Quantidade |
 |---|---|
-| 🔴 CRÍTICO | 6 |
-| 🟡 IMPORTANTE | 7 |
-| 🔵 MELHORIA | 6 |
+| 🔴 CRÍTICO | 1 |
+| 🟡 IMPORTANTE | 4 |
+| 🔵 MELHORIA | 4 |
 
-**Prioridade de correção sugerida:** primeiro os bugs que quebram o happy path — method check invertido, `return` faltando no handler, e `package cmd` no notification-service — o sistema não funciona nem em cenário ideal enquanto esses três existirem. Em seguida, a conectividade Kafka no compose (nada funciona containerizado até corrigir isso). Depois, consolidação: context propagation, error wrapping, testes, antes de escalar o projeto.
+**Prioridade sugerida:** a conectividade Kafka continua sendo o bloqueador nº 1 — sem ela, `docker-compose up` não funciona fim a fim, apesar de todo o resto do compose já estar certo. É a correção mais rápida da lista (é literalmente remover um `os.Setenv` e trocar uma env var em dois lugares) e destrava validar tudo o resto.

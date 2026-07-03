@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"notification-service/internal/adapter/events"
@@ -28,7 +29,10 @@ func main() {
 	notificationSender := sender.NewLogNotificationSender()
 	sendNotificationUC := usecase.NewSendNotification(notificationSender)
 
-	eventsCh, err := consumer.Consume("orders.created")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	eventsCh, err := consumer.Consume(ctx, "orders.created")
 	if err != nil {
 		log.Fatalf("❌ Erro ao iniciar consumer: %v", err)
 	}
@@ -55,6 +59,7 @@ func main() {
 
 	<-quit
 	log.Println("🛑 Sinal de parada recebido. Iniciando Graceful Shutdown...")
+	cancel()
 
 	time.Sleep(3 * time.Second)
 

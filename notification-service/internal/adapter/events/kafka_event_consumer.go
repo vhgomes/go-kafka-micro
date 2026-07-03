@@ -23,15 +23,19 @@ func NewKafkaEventConsumer(brokers []string, groupID, topic string) *KafkaEventC
 		}),
 	}
 }
-func (c *KafkaEventConsumer) Consume(topic string) (<-chan domain.OrderEvent, error) {
+func (c *KafkaEventConsumer) Consume(ctx context.Context, topic string) (<-chan domain.OrderEvent, error) {
 	events := make(chan domain.OrderEvent)
 
 	go func() {
 		defer close(events)
 
 		for {
-			msg, err := c.reader.ReadMessage(context.Background())
+			msg, err := c.reader.ReadMessage(ctx)
 			if err != nil {
+				if ctx.Err() != nil {
+					log.Println("🛑 Consumer Kafka encerrado via contexto")
+					return
+				}
 				log.Println("❌ Erro | Consumer Kafka: ", err)
 				continue
 			}

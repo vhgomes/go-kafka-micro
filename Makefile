@@ -146,7 +146,6 @@ docker-up: ## Sobe todos os containers (Kafka + serviços)
 	$(DOCKER_COMPOSE) up -d
 	@printf "$(COLOR_GREEN)✔ Containers em execução. Acesse:$(COLOR_RESET)\n"
 	@printf "  Order Service:      http://localhost:8080\n"
-	@printf "  Notification:       http://localhost:8081\n"
 	@printf "  Kafdrop (UI):       http://localhost:9000\n"
 
 docker-down: ## Derruba todos os containers

@@ -30,7 +30,7 @@ func (o KafkaOrderPublisher) Publish(ctx context.Context, order *domain.Order) e
 	payload, err := json.Marshal(order)
 
 	if err != nil {
-		return fmt.Errorf("KafkaPublisher | PublishOrderCreated error: " + err.Error())
+		return fmt.Errorf("KafkaPublisher | PublishOrderCreated error: %w", err)
 	}
 
 	message := kafka.Message{
@@ -38,9 +38,9 @@ func (o KafkaOrderPublisher) Publish(ctx context.Context, order *domain.Order) e
 		Value: payload,
 	}
 
-	err = o.writer.WriteMessages(context.Background(), message)
+	err = o.writer.WriteMessages(ctx, message)
 	if err != nil {
-		return fmt.Errorf("KafkaPublisher | PublishOrderCreated error: " + err.Error())
+		return fmt.Errorf("KafkaPublisher | PublishOrderCreated error: %w", err)
 	}
 
 	log.Printf("KafkaPublisher | PublishOrderCreated - Order ID: %s\n", order.OrderId.String())

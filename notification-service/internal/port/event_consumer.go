@@ -1,7 +1,11 @@
 package port
 
-import "notification-service/internal/domain"
+import (
+	"context"
+
+	"notification-service/internal/domain"
+)
 
 type EventConsumer interface {
-	Consume(topic string) (<-chan domain.OrderEvent, error)
+	Consume(ctx context.Context, topic string) (<-chan domain.OrderEvent, error)
 }

@@ -63,8 +63,6 @@ services:
       context: ./notification-service
       dockerfile: Dockerfile
     container_name: notification-service
-    ports:
-      - "8081:8081"
     environment:
       - KAFKA_BROKER_ADDRESS=kafka:9092
     networks:

@@ -50,11 +50,11 @@ func (co *CreateOrder) SaveOrder(ctx context.Context, itens []domain.Item) (*Cre
 	}
 
 	if err := co.repo.Save(ctx, &order); err != nil {
-		return nil, fmt.Errorf("repository failure: error saving order")
+		return nil, fmt.Errorf("repository failure: %w", err)
 	}
 
 	if err := co.publisher.Publish(ctx, &order); err != nil {
-		return nil, fmt.Errorf("publisher failure: error publishing order created message")
+		return nil, fmt.Errorf("publisher failure: %w", err)
 	}
 
 	return &CreateOrderOutput{

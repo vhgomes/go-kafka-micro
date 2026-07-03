@@ -1,284 +1,137 @@
-# Go Kafka Microservices
+# go-kafka-micro
 
-Um exemplo de **microsserviços em Go** com comunicação assíncrona via **Apache Kafka**, seguindo os princípios de **Arquitetura Hexagonal** (Ports & Adapters). O projeto demonstra a separação clara entre domínio, casos de uso e adaptadores, com injeção de dependência e foco em desacoplamento.
+Microserviços em Go integrados via Apache Kafka, seguindo arquitetura hexagonal (ports & adapters). Dois serviços independentes, comunicação assíncrona por eventos.
 
----
+## Arquitetura
 
-## 🏗️ Arquitetura
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Order Service                          │
-│  ┌─────────────┐   ┌────────────────┐   ┌───────────────────┐  │
-│  │   Handler   │ → │  CreateOrder   │ → │  OrderRepository  │  │
-│  │  (HTTP)     │   │   (Usecase)    │   │   (Port)          │  │
-│  └─────────────┘   └────────────────┘   └───────────────────┘  │
-│         │                   │                        │          │
-│         │                   ▼                        ▼          │
-│         │           ┌────────────────┐   ┌───────────────────┐  │
-│         │           │ OrderPublisher │   │InMemoryOrderRepo  │  │
-│         │           │   (Port)       │   │   (Adapter)       │  │
-│         │           └────────────────┘   └───────────────────┘  │
-│         │                    │                                  │
-│         │                    ▼                                  │
-│         │          ┌───────────────────┐                       │
-│         └─────────▶│ KafkaPublisher    │                       │
-│                    │   (Adapter)       │                       │
-│                    └───────────────────┘                       │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            │  (Kafka Topic: orders)
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Notification Service                       │
-│  ┌───────────────────┐   ┌──────────────────┐                 │
-│  │  Kafka Consumer   │ → │ SendNotification  │                 │
-│  │   (Adapter)       │   │   (Usecase)       │                 │
-│  └───────────────────┘   └──────────────────┘                 │
-│                                    │                           │
-│                                    ▼                           │
-│                          ┌────────────────────┐                │
-│                          │ NotificationSender │                │
-│                          │      (Port)        │                │
-│                          └────────────────────┘                │
-│                                    │                           │
-│                                    ▼                           │
-│                          ┌────────────────────┐                │
-│                          │ LogNotification    │                │
-│                          │   (Adapter)        │                │
-│                          └────────────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
+```text
+┌─────────────────┐        orders.created         ┌───────────────────────┐
+│   order-service │ ────────────────────────────▶ │  notification-service │
+│  HTTP :8080     │          (Kafka)              │  Kafka Consumer       │
+└─────────────────┘                               └───────────────────────┘
+        │                                                     │
+        ▼                                                     ▼
+  InMemoryOrderRepository                            LogNotificationSender
 ```
 
-- **Order Service**: recebe requisições HTTP para criação de pedidos, persiste em memória (repositório in-memory) e publica o evento no Kafka.
-- **Notification Service**: consome eventos do Kafka e envia notificações (atualmente via log, adaptável para e-mail/SMS).
-- **Kafka**: atua como barramento de eventos, desacoplando os serviços.
+- **order-service**: expõe HTTP para criação de pedidos, persiste (in-memory) e publica evento `orders.created` no Kafka.
+- **notification-service**: consome `orders.created` e dispara notificação (atualmente logada em stdout).
 
----
-
-## 🚀 Tecnologias
-
-| Camada             | Tecnologia                                                                                            |
-|--------------------|-------------------------------------------------------------------------------------------------------|
-| **Linguagem**      | Go 1.23.4                                                                                             |
-| **Web/HTTP**       | net/http (stdlib) – sem frameworks pesados                                                            |
-| **Mensageria**     | [segmentio/kafka-go](https://github.com/segmentio/kafka-go) (cliente puro Go para Kafka)              |
-| **Kafka Broker**   | [Bitnami Kafka](https://hub.docker.com/r/bitnami/kafka/) + Zookeeper                                  |
-| **Container**      | Docker + Docker Compose                                                                               |
-| **Observabilidade**| (futuro) Prometheus, OpenTelemetry                                                                    |
-| **Testes**         | (futuro) `testing` + `testify` + testcontainers                                                      |
-
----
-
-## 📁 Estrutura do Projeto
+Cada serviço segue a mesma estrutura interna:
 
 ```
-.
-├── order-service/                # Serviço de pedidos
-│   ├── cmd/
-│   │   └── main.go               # Ponto de entrada
-│   ├── internal/
-│   │   ├── adapter/              # Adaptadores concretos (HTTP handlers, Kafka publisher, repo in-memory)
-│   │   ├── domain/               # Entidades e regras de negócio (Order, Item)
-│   │   ├── port/                 # Interfaces (repositório, publicador)
-│   │   └── usecase/              # Casos de uso (CreateOrder)
-│   ├── Dockerfile
-│   └── go.mod
-│
-├── notification-service/         # Serviço de notificações
-│   ├── cmd/
-│   │   └── main.go
-│   ├── internal/
-│   │   ├── adapter/
-│   │   │   ├── events/           # Kafka consumer
-│   │   │   └── sender/           # Log notification sender
-│   │   ├── domain/               # Notification, OrderEvent
-│   │   ├── port/                 # Interfaces (consumer, sender)
-│   │   └── usecase/              # SendNotification
-│   ├── Dockerfile
-│   └── go.mod
-│
-├── docker-compose.yaml           # Orquestração: Zookeeper, Kafka, Kafdrop, order-service, notification-service
-├── .env.example                  # Exemplo de variáveis de ambiente
-├── .gitignore
-└── README.md
+internal/
+  domain/    # entidades de negócio
+  port/      # interfaces (contratos)
+  usecase/   # regras de aplicação
+  adapter/   # implementações concretas (HTTP, Kafka, memória)
 ```
 
----
+## Stack
 
-## 🔧 Pré-requisitos
+| Componente | Tecnologia |
+|---|---|
+| Linguagem | Go 1.23+ |
+| Mensageria | Apache Kafka (`segmentio/kafka-go`) |
+| IDs | `google/uuid` |
+| Orquestração local | Docker Compose |
+| UI de inspeção Kafka | Kafdrop |
+
+## Pré-requisitos
 
 - [Go 1.23+](https://golang.org/dl/)
-- [Docker](https://www.docker.com/products/docker-desktop)
-- [Docker Compose](https://docs.docker.com/compose/)
+- [Docker](https://www.docker.com/products/docker-desktop) + [Docker Compose](https://docs.docker.com/compose/)
 
----
+## Como rodar (desenvolvimento local)
 
-## 🐳 Executando com Docker Compose
-
-1. **Clone o repositório:**
-   ```bash
-   git clone https://github.com/vhgomes/go-kafka-micro.git
-   cd go-kafka-micro
-   ```
-
-2. **(Opcional)** Configure variáveis de ambiente:
-   ```bash
-   cp .env.example .env
-   # Edite .env se necessário (ex: KAFKA_BROKER)
-   ```
-
-3. **Suba todos os serviços:**
-   ```bash
-   docker-compose up -d
-   ```
-   Isso iniciará:
-   - Zookeeper (porta `2181`)
-   - Kafka (porta `9092`)
-   - Kafdrop (UI para visualizar tópicos, porta `9000`)
-   - Order Service (porta `8080`)
-   - Notification Service (porta `8081`)
-
-4. **Acesse o Kafdrop** para ver os tópicos: http://localhost:9000
-
-5. **Crie um pedido** (exemplo com `curl`):
-   ```bash
-   curl -X POST http://localhost:8080/order \
-        -H "Content-Type: application/json" \
-        -d '{
-             "itens": [
-               {"name": "Notebook", "quantity": 1, "price": 2500},
-               {"name": "Mouse", "quantity": 2, "price": 50}
-             ]
-           }'
-   ```
-
-6. **Verifique os logs do Notification Service** para ver a notificação recebida:
-   ```bash
-   docker-compose logs notification-service
-   ```
-
-7. **Para derrubar os serviços:**
-   ```bash
-   docker-compose down -v
-   ```
-
----
-
-## 🛠️ Executando Localmente (sem Docker)
-
-### 1. Suba Kafka e Zookeeper via Docker (ou use um broker existente)
+Suba a infraestrutura (Zookeeper + Kafka + Kafdrop):
 
 ```bash
-docker run -d --name zookeeper -p 2181:2181 zookeeper:3.8.1
-docker run -d --name kafka -p 9092:9092 \
-  -e KAFKA_BROKER_ID=1 \
-  -e KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 \
-  -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
-  -e KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092 \
-  bitnami/kafka:3.7
+docker-compose up zookeeper kafka kafdrop
 ```
 
-### 2. Order Service
+Em terminais separados, rode cada serviço direto com Go (fora do container, apontando para `localhost:9092`):
 
 ```bash
+# order-service
 cd order-service
-go mod tidy
-go run cmd/main.go
-```
+go run ./cmd
 
-### 3. Notification Service
-
-```bash
+# notification-service
 cd notification-service
-go mod tidy
-go run cmd/main.go
+go run ./cmd
 ```
 
-### 4. Teste com `curl` (mesmo exemplo acima)
+- Kafdrop disponível em `http://localhost:9000` para inspecionar os tópicos.
+- order-service disponível em `http://localhost:8080`.
 
----
+> **Nota:** rodar `order-service` e `notification-service` como containers via `docker-compose up` (todos os serviços) atualmente não conecta ao Kafka corretamente, pois o broker é anunciado em `localhost` e os serviços apontam para `localhost:9092` mesmo dentro da rede do compose. Até esse ajuste ser feito, use o fluxo acima (infra em container, serviços Go rodando localmente).
 
-## 📦 Endpoints da API
+## API — order-service
 
-### `POST /order`
+### `POST /orders`
 
-Cria um novo pedido e publica um evento no Kafka.
+Cria um pedido e publica o evento `orders.created`.
 
-**Request Body:**
+**Request body:**
+
+```json
+[
+  {
+    "Name": "Teclado mecânico",
+    "Quantity": 1,
+    "Price": 350.0
+  }
+]
+```
+
+**Response `201 Created`:**
+
 ```json
 {
-  "itens": [
-    {"name": "string", "quantity": int, "price": int64}
+  "ID": "b3f1c2a0-...",
+  "TotalAmount": 350.0,
+  "CreatedAt": "2026-07-03T12:00:00Z"
+}
+```
+
+**Erros:**
+- `400` — lista de itens vazia, quantidade inválida ou JSON malformado.
+- `500` — falha ao persistir ou publicar o evento.
+
+## Evento Kafka — `orders.created`
+
+Publicado pelo `order-service`, consumido pelo `notification-service`.
+
+```json
+{
+  "UserID": "uuid",
+  "OrderID": "string",
+  "Total": 0,
+  "Items": [
+    { "ProductID": "string", "Quantity": 0, "Price": 0 }
   ]
 }
 ```
 
-**Response (201 Created):**
-```json
-{
-  "id": "uuid",
-  "totalAmount": int64,
-  "createdAt": "timestamp"
-}
+## Estrutura do repositório
+
+```text
+order-service/
+  cmd/main.go
+  internal/
+    adapter/handlers/     # HTTP handler + router
+    adapter/repo/         # publisher Kafka + repositório in-memory
+    domain/                # entidade Order
+    port/                  # interfaces OrderRepository, OrderPublisher
+    usecase/                # CreateOrder
+notification-service/
+  cmd/main.go
+  internal/
+    adapter/events/         # consumer Kafka
+    adapter/sender/         # notificação (log)
+    domain/                  # Notification, OrderEvent
+    port/                    # interfaces EventConsumer, NotificationSender
+    usecase/                  # SendNotification
+docker-compose.yaml           # Zookeeper, Kafka, Kafdrop, serviços Go
 ```
-
-**Exemplo de erro (400 Bad Request):**
-```json
-{
-  "error": "you must provide at least one item"
-}
-```
-
----
-
-## 🧩 Decisões Técnicas
-
-| Decisão                                 | Justificativa                                                                                   |
-|-----------------------------------------|-------------------------------------------------------------------------------------------------|
-| **Arquitetura Hexagonal**               | Isola a lógica de negócio de detalhes externos (HTTP, Kafka, DB), facilitando testes e evolução.|
-| **Injeção de Dependência**              | Permite substituir implementações (ex: repositório em memória → PostgreSQL) sem alterar o usecase. |
-| **Kafka como barramento**               | Comunicação assíncrona, desacoplamento, resiliência e escalabilidade horizontal.               |
-| **`segmentio/kafka-go`**                | Cliente nativo em Go, performático e com bom suporte a contexts e concorrência.                |
-| **In‑memory repository**                | Simplifica o setup inicial e foca no fluxo de eventos; trocável por persistência real.        |
-| **Log notification sender**             | Permite observar o fluxo sem depender de serviços externos (e-mail/SMS).                      |
-
----
-
-## 🧪 Testes (Futuro)
-
-Ainda não há testes automatizados neste projeto. O roadmap inclui:
-
-- Testes unitários para `CreateOrder` (usando mocks dos ports).
-- Testes de integração com `testcontainers` para Kafka e PostgreSQL.
-- Cobertura com `go test -cover`.
-
----
-
-## 📝 Observações
-
-- O **Kafka** precisa estar disponível para os serviços se conectarem. Em ambiente Docker Compose, os serviços usam `kafka:9092` (resolvido pelo nome do container).
-- O **Kafdrop** é opcional, mas útil para monitorar tópicos e mensagens.
-- O repositório contém um arquivo `refactor.md` com uma code review detalhada e recomendações de melhorias – use como guia para evoluir o projeto.
-
----
-
-## 🤝 Como Contribuir
-
-1. Faça um fork do projeto.
-2. Crie uma branch para sua feature: `git checkout -b minha-feature`.
-3. Commit suas mudanças: `git commit -m 'Adiciona feature'`.
-4. Push para a branch: `git push origin minha-feature`.
-5. Abra um Pull Request.
-
----
-
-## 📄 Licença
-
-Este projeto está sob a licença MIT – sinta-se à vontade para usá-lo e adaptá-lo.
-
----
-
-## ✍️ Autor
-
-Desenvolvido por [Victor Hugo Gomes](https://github.com/vhgomes)

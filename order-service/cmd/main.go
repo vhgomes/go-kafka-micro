@@ -14,9 +14,13 @@ import (
 )
 
 func main() {
+	if err := os.Setenv("KAFKA_BROKER", "localhost:9092"); err != nil {
+		log.Fatalf("Erro ao definir variável de ambiente: %v", err)
+	}
+
 	orderRepo := repo.NewInMemoryOrderRepository()
 	orderPublisher := repo.NewKafkaOrderPublisher(
-		[]string{"localhost:9092"},
+		[]string{os.Getenv("KAFKA_BROKER")},
 		"orders.created",
 	)
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"order-service/internal/domain"
 	"order-service/internal/usecase"
@@ -24,20 +25,23 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	var items []domain.Item
 
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&items); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("Erro ao decodificar request: %v", err)
+		http.Error(w, "invalid request payload", http.StatusBadRequest)
 		return
 	}
 
 	output, err := h.createOrder.SaveOrder(r.Context(), items)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Erro interno: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(output)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Erro ao encodar resposta: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 }

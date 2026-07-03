@@ -6,16 +6,13 @@ import (
 )
 
 type SendNotification struct {
-	consumer           port.EventConsumer
 	notificationSender port.NotificationSender
 }
 
 func NewSendNotification(
-	consumer port.EventConsumer,
 	notificationSender port.NotificationSender,
 ) *SendNotification {
 	return &SendNotification{
-		consumer:           consumer,
 		notificationSender: notificationSender,
 	}
 }

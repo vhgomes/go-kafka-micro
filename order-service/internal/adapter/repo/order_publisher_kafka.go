@@ -34,6 +34,7 @@ func (o KafkaOrderPublisher) Publish(ctx context.Context, order *domain.Order) e
 	}
 
 	message := kafka.Message{
+		Topic: o.topic,
 		Key:   []byte(order.OrderId.String()),
 		Value: payload,
 	}

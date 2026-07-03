@@ -7,7 +7,9 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
+      # Define duas portas de escuta: 29092 (Interna) e 9092 (Externa)
       KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:29092,PLAINTEXT_EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      # Anuncia kafka:29092 para os containers e localhost:9092 para sua máquina
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:29092,PLAINTEXT_EXTERNAL://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -35,7 +37,8 @@ services:
     ports:
       - "9000:9000"
     environment:
-      KAFKA_BROKERCONNECT: kafka:9092
+      # Kafdrop roda num container, logo acessa a porta interna
+      KAFKA_BROKERCONNECT: kafka:29092
       JVM_OPTS: "-Xms32M -Xmx64M"
     networks:
       - monitoring
@@ -51,7 +54,8 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - KAFKA_BROKER_ADDRESS=kafka:9092
+      # Serviço no container acessando a porta interna do Kafka
+      - KAFKA_BROKER_ADDRESS=kafka:29092
     networks:
       - monitoring
     depends_on:
@@ -64,7 +68,8 @@ services:
       dockerfile: Dockerfile
     container_name: notification-service
     environment:
-      - KAFKA_BROKER_ADDRESS=kafka:9092
+      # Serviço no container acessando a porta interna do Kafka
+      - KAFKA_BROKER_ADDRESS=kafka:29092
     networks:
       - monitoring
     depends_on:

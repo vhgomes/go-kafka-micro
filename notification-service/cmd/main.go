@@ -18,7 +18,7 @@ func main() {
 	)
 
 	notificationSender := sender.NewLogNotificationSender()
-	sendNotificationUC := usecase.NewSendNotification(consumer, notificationSender)
+	sendNotificationUC := usecase.NewSendNotification(notificationSender)
 
 	eventsCh, err := consumer.Consume("orders.created")
 

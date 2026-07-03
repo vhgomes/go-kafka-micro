@@ -22,7 +22,8 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var items []domain.Item
-	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&items); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
